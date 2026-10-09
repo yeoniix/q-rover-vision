@@ -1,0 +1,8 @@
+name: test
+description: "Q-ROVER 3차시 공통 미션 - 우리 팀 물체를 가운데로 맞추며 다가가기 (P제어)"
+ports: []
+bricks:
+- arduino:video_object_detection:
+    model: ei-model-1132614-1
+- arduino:web_ui: {}
+icon: 🚙
