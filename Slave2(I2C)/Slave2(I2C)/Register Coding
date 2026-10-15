@@ -1,0 +1,78 @@
+#include <Wire.h>
+#include <avr/io.h>
+#include <util/atomic.h>
+
+const byte I2C_ADDR = 0x08;
+volatile byte current = 0;
+volatile byte potLevel = 0;
+volatile byte pressCount = 0;
+bool lastBtn = HIGH;
+unsigned long lastBtnTime = 0;
+void sendData();
+
+uint16_t readADC(byte channel) {
+  ADMUX = _BV(REFS0) | (channel & 0x07);
+  ADCSRA |= _BV(ADSC);
+  while (ADCSRA & _BV(ADSC)) {}
+  return ADC;
+}
+
+uint16_t readAvg(byte channel) {
+  readADC(channel);  // 채널 변경 후 첫 변환은 버림
+  uint16_t sum = 0;
+  for (byte i = 0; i < 8; i++) {
+    sum += readADC(channel);
+  }
+  return sum / 8;
+}
+
+void setup() {
+  DDRD &= ~_BV(DDD2);  // D2(PD2): 입력
+  PORTD |= _BV(PORTD2);  // 내부 풀업 사용
+
+  DDRC &= ~(_BV(DDC0) | _BV(DDC1));  // A0, A1: 입력
+  PORTC &= ~(_BV(PORTC0) | _BV(PORTC1));  // 풀업 해제
+  DIDR0 |= _BV(ADC0D) | _BV(ADC1D);
+  ADMUX = _BV(REFS0);  // AVcc 기준, 오른쪽 정렬
+  ADCSRB = 0;
+  ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
+
+  Wire.begin(I2C_ADDR);
+  Wire.onRequest(sendData);
+  Serial.begin(9600);
+}
+
+void loop() {
+  unsigned long now = millis();
+
+  byte newCurrent = (byte)(readAvg(0) / 4);
+  byte newPotLevel = (byte)((uint32_t)readAvg(1) * 100UL / 1023UL);
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    current = newCurrent;
+    potLevel = newPotLevel;
+  }
+
+  bool btn = (PIND & _BV(PIND2)) ? HIGH : LOW;
+  if (btn == LOW && lastBtn == HIGH && now - lastBtnTime > 200) {
+    pressCount++;
+    lastBtnTime = now;
+  }
+  lastBtn = btn;
+
+  static unsigned long tDbg = 0;
+  if (now - tDbg >= 500) {
+    tDbg = now;
+    Serial.print("A0 current: ");
+    Serial.print(current);
+    Serial.print("  A1 level: ");
+    Serial.print(potLevel);
+    Serial.print("%  press count: ");
+    Serial.println(pressCount);
+  }
+  delay(5);
+}
+
+void sendData() {
+  byte buf[3] = {current, potLevel, pressCount};
+  Wire.write(buf, 3);
+}
